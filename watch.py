@@ -8,7 +8,8 @@ rewrites the tracker page in docs/.
 import json, os, glob, time, datetime, urllib.request, urllib.parse
  
 STORE = "https://www.toykingdom.com.ph"
-FEED = STORE + "/collections/pokemon/products.json?limit=250&page={}"
+FEED = STORE + "/products.json?limit=250&page={}"   # whole store; filtered to Pokémon TCG below
+SCOPE = "store-wide-pokemon-tcg"
 DATA = "docs/data.json"
 TOPIC = os.environ.get("NTFY_TOPIC", "").strip()
 REPO = os.environ.get("GITHUB_REPOSITORY", "")
@@ -38,11 +39,12 @@ def fetch_products():
             out += json.load(open(p)).get("products", [])
         return out
     out = []
-    for page in range(1, 11):
+    for page in range(1, 81):
         batch = get_json(FEED.format(page)).get("products", [])
         out += batch
         if len(batch) < 250:
             break
+        time.sleep(1)  # be gentle with the store
     return out
  
  
@@ -66,12 +68,15 @@ except Exception:
 old = state.get("products") or {}
 events = state.get("events") or []
 status = state.get("status") or {}
-first_run = not state.get("baseline") and not old
+# A first run (or a change in what we watch) only records the baseline, so it never alerts.
+first_run = state.get("scope") != SCOPE
+if first_run:
+    old = {}
  
 try:
     raw = fetch_products()
     if not raw:
-        raise RuntimeError("the store returned no Pokémon products")
+        raise RuntimeError("the store returned no products")
 except Exception as e:
     fails = int(status.get("fails", 0)) + 1
     status.update({"lastCheck": now, "ok": False, "fails": fails,
@@ -93,7 +98,19 @@ TCG_WORDS = re.compile(
     r"collection box|ex box|v box|build ?& ?battle|starter set|expansion pack)\b", re.I)
  
  
+NOT_TCG = re.compile(r"\b(uno|plush|figures?|figurine|keychains?|puzzles?|blind ?box|"
+                     r"building blocks?|blocks? set|costume|lunch ?kit|tumbler|bag|backpack)\b", re.I)
+ 
+ 
+def is_pokemon(prod):
+    text = " ".join([prod.get("title", ""), prod.get("vendor") or "", prod.get("product_type") or "",
+                     " ".join(prod.get("tags") or []) if isinstance(prod.get("tags"), list) else str(prod.get("tags") or "")])
+    return bool(re.search(r"pok[eé]mon", text, re.I))
+ 
+ 
 def is_tcg(prod):
+    if NOT_TCG.search(prod.get("title", "")):
+        return False
     meta = " ".join([prod.get("product_type") or "", " ".join(prod.get("tags") or [])
                      if isinstance(prod.get("tags"), list) else str(prod.get("tags") or "")])
     if re.search(r"card|tcg", meta, re.I):
@@ -101,7 +118,7 @@ def is_tcg(prod):
     return bool(TCG_WORDS.search(prod.get("title", "")))
  
  
-raw = [p for p in raw if is_tcg(p)]
+raw = [p for p in raw if is_pokemon(p) and is_tcg(p)]
  
 cur = {}
 for prod in raw:
@@ -141,7 +158,7 @@ events = events[:150]
 status = {"lastCheck": now, "ok": True, "fails": 0, "count": len(cur), "message": "",
           "lastFound": now if (new or restock) else status.get("lastFound")}
 os.makedirs("docs", exist_ok=True)
-json.dump({"baseline": True, "products": cur, "events": events, "status": status}, open(DATA, "w"), ensure_ascii=False)
+json.dump({"scope": SCOPE, "products": cur, "events": events, "status": status}, open(DATA, "w"), ensure_ascii=False)
  
  
 def peso(v):
@@ -238,3 +255,4 @@ load();setInterval(load,300000);
 '''
 open("docs/index.html", "w").write(PAGE)
 open("docs/.nojekyll", "w").write("")
+ 

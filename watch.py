@@ -238,5 +238,3 @@ load();setInterval(load,300000);
 '''
 open("docs/index.html", "w").write(PAGE)
 open("docs/.nojekyll", "w").write("")
-
- 

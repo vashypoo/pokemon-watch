@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Toy Kingdom Pokémon watcher. Runs hourly on GitHub Actions.
-
+ 
 Reads the store's Pokémon product feed, compares it with docs/data.json,
 records new listings and restocks, pushes a phone alert via ntfy, and
 rewrites the tracker page in docs/.
 """
 import json, os, glob, time, datetime, urllib.request, urllib.parse
-
+ 
 STORE = "https://www.toykingdom.com.ph"
 FEED = STORE + "/collections/pokemon/products.json?limit=250&page={}"
 DATA = "docs/data.json"
@@ -15,8 +15,8 @@ REPO = os.environ.get("GITHUB_REPOSITORY", "")
 PAGE_URL = f"https://{REPO.split('/')[0].lower()}.github.io/{REPO.split('/')[-1]}/" if "/" in REPO else ""
 UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36"
 now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat()
-
-
+ 
+ 
 def get_json(url):
     last = None
     for attempt in range(3):
@@ -28,8 +28,8 @@ def get_json(url):
             last = e
             time.sleep(5 * (attempt + 1))
     raise last
-
-
+ 
+ 
 def fetch_products():
     local = os.environ.get("TK_PAGES_DIR")  # for offline testing only
     if local:
@@ -44,8 +44,8 @@ def fetch_products():
         if len(batch) < 250:
             break
     return out
-
-
+ 
+ 
 def push(title, body, click):
     if not TOPIC:
         print("NTFY_TOPIC not set; skipping alert")
@@ -57,8 +57,8 @@ def push(title, body, click):
         urllib.request.urlopen(req, timeout=20).read()
     except Exception as e:
         print("alert failed:", e)
-
-
+ 
+ 
 try:
     state = json.load(open(DATA))
 except Exception:
@@ -67,7 +67,7 @@ old = state.get("products") or {}
 events = state.get("events") or []
 status = state.get("status") or {}
 first_run = not old
-
+ 
 try:
     raw = fetch_products()
     if not raw:
@@ -84,7 +84,25 @@ except Exception as e:
              "3 checks in a row failed. Alerts are paused until the store answers again.", PAGE_URL or STORE)
     print("check failed:", repr(e))
     raise SystemExit(0)
-
+ 
+import re
+# Keep only trading-card products. Matches the store's category/tags, or card words in the name.
+TCG_WORDS = re.compile(
+    r"\b(tcg|trading card|card game|cards?|booster|elite trainer|etb|blister|"
+    r"tins?|deck|sleeves?|binder|portfolio|playmat|premium collection|"
+    r"collection box|ex box|v box|build ?& ?battle|starter set|expansion pack)\b", re.I)
+ 
+ 
+def is_tcg(prod):
+    meta = " ".join([prod.get("product_type") or "", " ".join(prod.get("tags") or [])
+                     if isinstance(prod.get("tags"), list) else str(prod.get("tags") or "")])
+    if re.search(r"card|tcg", meta, re.I):
+        return True
+    return bool(TCG_WORDS.search(prod.get("title", "")))
+ 
+ 
+raw = [p for p in raw if is_tcg(p)]
+ 
 cur = {}
 for prod in raw:
     vs = prod.get("variants") or []
@@ -100,7 +118,7 @@ for prod in raw:
         "image": (imgs[0].get("src") + "&width=200") if imgs and "?" in imgs[0].get("src", "") else
                  ((imgs[0].get("src") + "?width=200") if imgs else None),
     }
-
+ 
 new, restock = [], []
 for pid, p in cur.items():
     prev = old.get(pid)
@@ -112,34 +130,34 @@ for pid, p in cur.items():
         p["firstSeen"] = prev.get("firstSeen", now)
         if p["available"] and not prev.get("available"):
             restock.append(pid)
-
+ 
 for kind, ids in (("new", new), ("restock", restock)):
     for pid in ids:
         p = cur[pid]
         events.insert(0, {"type": kind, "productId": pid, "title": p["title"], "handle": p["handle"],
                           "price": p["price"], "image": p["image"], "at": now})
 events = events[:150]
-
+ 
 status = {"lastCheck": now, "ok": True, "fails": 0, "count": len(cur), "message": "",
           "lastFound": now if (new or restock) else status.get("lastFound")}
 os.makedirs("docs", exist_ok=True)
 json.dump({"products": cur, "events": events, "status": status}, open(DATA, "w"), ensure_ascii=False)
-
-
+ 
+ 
 def peso(v):
     return f"₱{v:,.0f}" if v else ""
-
-
+ 
+ 
 if new or restock:
     lines = [f"NEW: {cur[i]['title']} {peso(cur[i]['price'])}" for i in new]
     lines += [f"BACK: {cur[i]['title']} {peso(cur[i]['price'])}" for i in restock]
     one = (new + restock)[0]
     click = STORE + "/products/" + cur[one]["handle"] if len(new + restock) == 1 else (PAGE_URL or STORE + "/collections/pokemon")
-    title = f"Toy Kingdom: {len(new)} new, {len(restock)} restocked"
+    title = f"Toy Kingdom TCG: {len(new)} new, {len(restock)} restocked"
     push(title, "\n".join(lines[:8]) + (f"\n+{len(lines) - 8} more" if len(lines) > 8 else ""), click)
-
+ 
 print(json.dumps({"firstRun": first_run, "count": len(cur), "new": len(new), "restock": len(restock)}))
-
+ 
 # ---- tracker page -------------------------------------------------------
 PAGE = r'''<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -182,7 +200,7 @@ ul{display:grid;gap:8px;margin:0;padding:0;list-style:none}
 #q{flex:1 1 160px;min-width:0;font:inherit;font-size:14px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink)}
 footer{font-size:12.5px;color:var(--muted)}
 </style></head><body><div class="wrap">
-<header><div class="eyebrow">toykingdom.com.ph · Pokémon collection</div><h1>Pokémon Watch</h1>
+<header><div class="eyebrow">toykingdom.com.ph · Pokémon TCG</div><h1>Pokémon Watch</h1>
 <div class="status" id="status">Loading…</div>
 <div class="tally"><div><b id="tT">–</b><span>Listed</span></div><div><b id="tI">–</b><span>In stock</span></div><div><b id="tO">–</b><span>Sold out</span></div></div></header>
 <section><h2>Recent finds</h2><ul id="feed"><li class="empty">New listings and restocks show up here, newest first. The first check records what's already in the store, so finds start from the second check.</li></ul></section>
@@ -220,4 +238,4 @@ load();setInterval(load,300000);
 '''
 open("docs/index.html", "w").write(PAGE)
 open("docs/.nojekyll", "w").write("")
-
+ 

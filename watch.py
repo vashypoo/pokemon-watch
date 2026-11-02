@@ -66,7 +66,7 @@ except Exception:
 old = state.get("products") or {}
 events = state.get("events") or []
 status = state.get("status") or {}
-first_run = not old
+first_run = not state.get("baseline") and not old
  
 try:
     raw = fetch_products()
@@ -141,7 +141,7 @@ events = events[:150]
 status = {"lastCheck": now, "ok": True, "fails": 0, "count": len(cur), "message": "",
           "lastFound": now if (new or restock) else status.get("lastFound")}
 os.makedirs("docs", exist_ok=True)
-json.dump({"products": cur, "events": events, "status": status}, open(DATA, "w"), ensure_ascii=False)
+json.dump({"baseline": True, "products": cur, "events": events, "status": status}, open(DATA, "w"), ensure_ascii=False)
  
  
 def peso(v):
@@ -238,4 +238,5 @@ load();setInterval(load,300000);
 '''
 open("docs/index.html", "w").write(PAGE)
 open("docs/.nojekyll", "w").write("")
+
  

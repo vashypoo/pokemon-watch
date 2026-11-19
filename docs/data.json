@@ -1,1 +1,1 @@
-{"scope": "store-wide-pokemon-tcg", "products": {}, "events": [], "status": {"lastCheck": "2026-11-19T01:03:50+00:00", "ok": false, "fails": 1, "count": 0, "message": "Couldn't read the store (HTTPError). Retrying next hour.", "lastFound": null}}
+{"scope": "store-wide-pokemon-tcg", "products": {}, "events": [], "status": {"lastCheck": "2026-11-19T08:43:03+00:00", "ok": true, "fails": 0, "count": 0, "message": "", "lastFound": null}}
